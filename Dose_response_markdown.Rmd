@@ -136,7 +136,19 @@ FoodT <- inner_join(FFQ_full, image_freqs_cats, by = "email_id")
 
 # Descriptive graphs and summaries
 
-The first figure shows the distribution of training sessions over time across the sample starting with the day of the first conducted session.
+Let's first take a look at our sample: we have `r sum(FFQ_T1$gender =="Female", na.rm = TRUE)` women, `r sum(FFQ_T1$diet0 =="Yes", na.rm = TRUE)` dieters at T1, `r sum(FFQ_T1$diet1 =="Yes", na.rm = TRUE)` at T2, `r sum(FFQ_T1$smoker0 =="Yes", na.rm = TRUE)` at T1, and `r sum(FFQ_T1$smoker1 =="Yes", na.rm = TRUE)` at T2. The distribution of BMI at T1 and age look as follows.
+
+```{r}
+bmi <- ggplot(FoodT, aes(bmi0)) + 
+                geom_histogram() +
+  theme_minimal()
+age <- ggplot(FoodT, aes(age)) + 
+                geom_histogram(binwidth = 3) +
+  theme_minimal()
+cowplot::plot_grid(bmi, age)
+```
+
+The next figure shows the distribution of training sessions over time across the sample starting with the day of the first conducted session.
 
 ```{r}
 # Distribution of logins over time, strating from the first use:
@@ -169,17 +181,6 @@ ggplot(data = subset(freqs_long, category != "n_fillers" & category != "n_health
   coord_flip()
 ```
 
-Let's take a look at our sample: we have `r sum(FFQ_T1$gender =="Female", na.rm = TRUE)` women, `r sum(FFQ_T1$diet0 =="Yes", na.rm = TRUE)` dieters at T1, `r sum(FFQ_T1$diet1 =="Yes", na.rm = TRUE)` at T2, `r sum(FFQ_T1$smoker0 =="Yes", na.rm = TRUE)` at T1, and `r sum(FFQ_T1$smoker1 =="Yes", na.rm = TRUE)` at T2. The distribution of BMI at T1 and age look as follows.
-
-```{r}
-bmi <- ggplot(FoodT, aes(bmi0)) + 
-                geom_histogram() +
-  theme_minimal()
-age <- ggplot(FoodT, aes(age)) + 
-                geom_histogram(binwidth = 3) +
-  theme_minimal()
-cowplot::plot_grid(bmi, age)
-```
 
 Let's look at distributions of the total trials per person. We can see that a few people did _loads_ of trials.
 
@@ -818,7 +819,7 @@ We first do the same thing as for the unhealthy foods: we run a random-intercept
 
 ```{r, results = "asis"}
 FoodT_long_healthy <- FoodT %>%
-  dplyr::select(., email_id, bmi0, age, gender, smoker0, diet0, n_healthy, hlthymean, hlthymean1) %>%
+  dplyr::select(., metcon0, email_id, bmi0, age, gender, smoker0, diet0, n_healthy, hlthymean, hlthymean1) %>%
   gather(., "timepoint", "healthy_intake", c("hlthymean", "hlthymean1")) %>%
   dplyr::mutate(timepoint = recode_factor(timepoint,
                                           "hlthymean" = "T1", 
