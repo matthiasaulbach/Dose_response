@@ -1,0 +1,920 @@
+---
+title: "Dose-response in FoodT"
+author: "Matthias Aulbach"
+date: "29 11 2019"
+output:
+  html_document:
+    code_folding: hide
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_float: true
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error=FALSE, warning=FALSE, message = FALSE)
+options(scipen=999)
+pacman::p_load(car, openxlsx, ggplot2, dplyr, tidyr, MASS, afex, lme4, merTools)
+# Here's the training data:
+FoodT_training <- read.xlsx("//ad.helsinki.fi/home/a/aulbach/Desktop/Collaboration_Exeter/Dose_response/App_Data_Matthias.xlsx", sheet = 3)
+# This is the FFQ data etc.:
+FoodT_FFQ <- read.xlsx("//ad.helsinki.fi/home/a/aulbach/Desktop/Collaboration_Exeter/Dose_response/App_Data_Matthias.xlsx", sheet = 1)
+```
+
+
+```{r, include = FALSE}
+# Data wrangling
+# Get the actual date when the session was done
+FoodT_training$calendar_date_clear <- openxlsx::convertToDate(FoodT_training$calendar_date)
+# Now I need a variable indicating how long from the first session this session is (i.e. "standardize" it to the person)
+FoodT_training <- FoodT_training %>% 
+  group_by(login) %>%
+  mutate(days_since_start = if_else(calendar_date_clear == min(calendar_date_clear), 0, as.numeric(calendar_date_clear - min(calendar_date_clear))))
+
+
+# Creating a variable indicating whether default training settings were used
+FoodT_training$default <- ifelse(FoodT_training$image_category == "default/default/default", 1, 0)
+
+
+# Let's calculate how often each image appeared for each participant
+image_frequencies <- FoodT_training %>% 
+  dplyr::select(., "login", contains("image"), -"image_category") %>%
+  gather(., "image_number", "image", "1_1_image":"3_32_image") %>%
+  group_by(login, image) %>%
+  summarise(n=n())
+
+
+# And now we want to know how often the categories of images appeared
+######### Note: I re-code the default images into their respective categories!! Double-check that those categorizations are correct! #########
+image_frequencies_wide <- image_frequencies %>%
+  ungroup() %>%
+  group_by(login) %>%
+  tidyr::spread(., key = image, value = n) %>%
+  dplyr::mutate(n_alcohol = sum(alcohol9, alcohol10, alcohol11, alcohol12, alcohol13, alcohol14, alcohol15, alcohol16, na.rm = TRUE),
+         n_biscuits = sum(biscuits9, biscuits10, biscuits11, biscuits12, biscuits13, biscuits14, biscuits15, biscuits16, default9, default13, na.rm = TRUE),
+         n_bread = sum(bread9, bread10, bread11, bread12, bread13, bread14, bread15, bread16, na.rm = TRUE),
+         n_cakes = sum(cakes9, cakes10, cakes11, cakes12, cakes13, cakes14, cakes15, cakes16, default10, na.rm = TRUE),
+         n_cheese = sum(cheese9, cheese10, cheese11, cheese12, cheese13, cheese14, cheese15, cheese16, na.rm = TRUE),
+         n_chocolate = sum(chocolate9, chocolate10, chocolate11, chocolate12, chocolate13, chocolate14, chocolate15, chocolate16, default11, default12, na.rm = TRUE),
+         n_crisps = sum(crisps9, crisps10, crisps11, crisps12, crisps13, crisps14, crisps15, crisps16, default14, default15, default16, na.rm = TRUE),
+         n_fastfood = sum(fastfood9, fastfood10, fastfood11, fastfood12, fastfood13, fastfood14, fastfood15, fastfood16, na.rm = TRUE),
+         n_fizzydrinks = sum(fizzydrinks9, fizzydrinks10, fizzydrinks11, fizzydrinks12, fizzydrinks13, fizzydrinks14, fizzydrinks15, fizzydrinks16, na.rm = TRUE),
+         n_icecream = sum(icecream9, icecream10, icecream11, icecream12, icecream13, icecream14, icecream15, icecream16, na.rm = TRUE), #icecream is missing from the FFQ in the app
+         n_meat = sum(meat9, meat10, meat11, meat12, meat13, meat14, meat15, meat16, na.rm = TRUE),
+         n_pastries = sum(pastries9, pastries10, pastries11, pastries12, pastries13, pastries14, pastries15, pastries16, na.rm = TRUE),
+         n_pizza = sum(pizza9, pizza10, pizza11, pizza12, pizza13, pizza14, pizza15, pizza16, na.rm = TRUE),
+         n_sweets = sum(sweets9, sweets10, sweets11, sweets12, sweets13, sweets14, sweets15, sweets16, na.rm = TRUE),
+         n_fruit = sum(image1, image3, image4, na.rm = TRUE),
+         n_vegetables = sum(image2, image5, image7, image8, na.rm = TRUE),
+         n_healthy = sum(image1, image2, image3, image4, image5, image6, image7, image8, na.rm = TRUE), #The healthy foods section is a bit messy: there's 3 fruits and 4 vegetables plus one unclear item (probably crispbread)
+         n_fillers = sum(image17, image18, image19, image20, image21, image22, image23, image24, image25, image26, image27, image28, image29,
+                         image30, image31, image32, na.rm = TRUE)) %>%
+  dplyr::mutate(n_unhealthy = sum(n_alcohol, n_biscuits, n_bread, n_cakes, n_cheese, n_chocolate, n_crisps, n_fastfood, n_fizzydrinks, n_icecream, n_meat, n_pastries, n_pizza, n_sweets, na.rm = TRUE),
+                n_total = sum(n_unhealthy, n_healthy, n_fillers, na.rm = TRUE))
+
+# Then create mean values AND median values
+mean_ns <- 
+  image_frequencies_wide %>% 
+  ungroup() %>%
+  #group_by(default) %>%
+  summarise_at(., vars("n_alcohol":"n_fillers"), funs(mean), na.rm = TRUE) %>%
+  gather(., "category", "n", "n_alcohol":"n_fillers")
+
+median_ns <- image_frequencies_wide %>% 
+  ungroup() %>%
+  #group_by(default) %>%
+  summarise_at(., vars("n_alcohol":"n_fillers"), funs(median), na.rm = TRUE) %>%
+  gather(., "category", "n", "n_alcohol":"n_fillers")
+
+mean <- "mean"
+
+freqs_long <- image_frequencies_wide %>%
+  ungroup() %>%
+  #group_by(default) %>%
+  dplyr::select("n_alcohol":"n_fillers") %>%
+  gather(., "category", "n", "n_alcohol":"n_fillers")
+
+# Turning to the FFQ data:
+FFQ_T1 <- FoodT_FFQ[1:49]
+FFQ_T2 <- FoodT_FFQ[50:98]
+
+# And now let's combine the data frames again so the variables get new names
+FFQ_full <- bind_cols(FFQ_T1, FFQ_T2)
+# Now the T2 variables always end on a "1"
+
+# Stick FFQ1 and FFQ2 together below each other (makes sense for some procedures)
+FFQ <- rbind(FFQ_T1, FFQ_T2)
+
+
+
+FFQ <- FFQ %>%
+  mutate_at(., c("gender", "diet0", "diet1", "smoker0", "smoker1"), funs(factor(.))) 
+
+# Let's gather the food data so we can nicely plot it
+FFQ_long <- FFQ %>% 
+  gather(., "food", "frequency", "crisp":"crispbr")
+# Distribution of food frequencies
+## Note: chips, icecream, and pastries were not present in the app, so I will throw these out
+FFQ_long <- subset(FFQ_long, food != "chips" & food != "ice" & food != "pastri")
+FFQ_means <- FFQ_long %>%
+  group_by(food, time) %>%
+  summarise_at("frequency", mean, na.rm = TRUE)
+
+
+########## FFQ1 and trials ###########
+# For this, we need the image_frequencies in the same dataframe as the FFQ data
+# Let's first extract the category-wise data from the image_frequencies_wide df
+image_freqs_cats <-  image_frequencies_wide %>%
+  ungroup() %>%
+  dplyr::select(., email_id = login,
+                contains("n_"))
+# And now stick dataframes together with only those IDs existing in both dfs
+FoodT <- inner_join(FFQ_full, image_freqs_cats, by = "email_id")
+
+
+```
+
+# Descriptive graphs and summaries
+
+The first figure shows the distribution of training sessions over time across the sample starting with the day of the first conducted session.
+
+```{r}
+# Distribution of logins over time, strating from the first use:
+ggplot(FoodT_training, aes(round(days_since_start, 0))) + 
+  geom_histogram(binwidth = 1) + 
+  scale_x_continuous(breaks=c(5,10,15,20,25,30)) +
+  theme_minimal() +
+  xlab("Days since start") +
+  ylab("Total number of sessions")
+NAs <- image_frequencies %>% 
+  filter(is.na(image)) %>% 
+  summarise_at("n", sum) %>%  
+  summarise_at("n", sum)
+```
+
+In total, we have `r sum(image_frequencies$n)` trials, `NAs` of which have missing values (which, I suppose, means that the session was not completed).
+
+The distribution of the trials across categories is shown in the next graph with red dots being single trials, the blue triangles the mean, and the green diamonds the median.
+
+```{r}
+ggplot(data = subset(freqs_long, category != "n_fillers" & category != "n_healthy"), aes(x = category, y = n)) +
+  geom_point(color = "red", alpha = 0.2) +
+  geom_jitter(color = "red", alpha = 0.2) +
+  geom_point(data = subset(mean_ns, category != "n_fillers" & category != "n_healthy"), aes(x = category, y = n), size = 4, shape = 17, color = "steelblue") +
+  geom_point(data = subset(median_ns, category != "n_fillers" & category != "n_healthy"), aes(x = category, y = n), size = 4, shape = 18, color = "#009E73") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ylab("Number of trials") +
+  xlab("Food category") +
+  coord_flip()
+```
+
+Let's take a look at our sample: we have `r sum(FFQ_T1$gender =="Female", na.rm = TRUE)` women, `r sum(FFQ_T1$diet0 =="Yes", na.rm = TRUE)` dieters at T1, `r sum(FFQ_T1$diet1 =="Yes", na.rm = TRUE)` at T2, `r sum(FFQ_T1$smoker0 =="Yes", na.rm = TRUE)` at T1, and `r sum(FFQ_T1$smoker1 =="Yes", na.rm = TRUE)` at T2. The distribution of BMI at T1 and age look as follows.
+
+```{r}
+bmi <- ggplot(FoodT, aes(bmi0)) + 
+                geom_histogram() +
+  theme_minimal()
+age <- ggplot(FoodT, aes(age)) + 
+                geom_histogram(binwidth = 3) +
+  theme_minimal()
+cowplot::plot_grid(bmi, age)
+```
+
+Let's look at distributions of the total trials per person. We can see that a few people did _loads_ of trials.
+
+```{r}
+# Let's look at distributions of the total trials
+ggplot(FoodT, aes(n_total)) +
+  geom_histogram(binwidth = 100) +
+  theme_minimal()
+```
+
+Of course, we also want to see the distributions of the food intake variables. We have individuals in black and means with standard errors in red. We can nicely see that unhealthy foods tend to go down and healthy ones up. We can also see that bread, cheese, fruit, vegetables, and meat are most common, followed by sweets and chocolate.
+
+```{r}
+ggplot(FFQ_long, aes(x =  time, y = frequency)) +  
+  geom_point(alpha = 0.2) + 
+  geom_jitter(height = 0.5, alpha = 0.2) +
+  stat_summary(geom = "crossbar", fun.data = mean_se, width = 0.7, color = "red") +
+  facet_grid(cols = vars(food)) + 
+  theme_minimal() +
+  theme(text = element_text(size=18),
+        axis.text.x = element_text(angle = 90), 
+        strip.text.x = element_text(size = 24, angle = 90))
+```
+
+
+
+Now let's turn to the relation between reduce of food intake and the amount of trials. Here is a graph showing the overall relation. We have the linear regression line in green and a cubic function in red. In addition, we have a Loess function in blue which fits a local regression minimising residuals.
+
+```{r}
+FoodT <- FoodT %>% mutate(., crisp_diff = crisp1 - crisp,
+                 choco_diff = choco1 - choco,
+                 bis_diff = bis1 - bis,
+                 sweet_diff = sweet1 - sweet,
+                 cake_diff = cake1 - cake,
+                 alco_diff = alco1 - alco,
+                 bread_diff = bread1 - bread,
+                 cheese_diff = cheese1 - cheese,
+                 ffood_diff = ffood1 - ffood,
+                 fzdrink_diff = fzdrink1 - fzdrink,
+                 meat_diff = meat1 - meat,
+                 pizza_diff = pizza1 - pizza,
+                 fruit_diff = fruit1 - fruit,
+                 vege_diff = vege1 - vege,
+                 cripbr_diff = crispbr1 - crispbr,
+                 unhlthymean_diff = unhlthymean1 - unhlthymean,
+                 hlthymean_diff = hlthymean1 - hlthymean)
+
+ggplot(FoodT, aes(x = n_total, y = unhlthymean_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red") +
+  geom_smooth() +
+  theme_minimal() +
+  xlab("Total amount of trials") +
+  ylab("Unhealthy food intake T2 - T1") +
+  theme(text = element_text(size = 26))
+```
+
+This graph is really full of data points, so it's hard to tell what's going on. That's why no split up the sample and graph about 100 people at a time. That way, we might be able to better identify trends in the data. Note that I'm not forcing a straight line on the graph as I did earlier but instead the blue fits the Loess function and the red line represents a polynomial (cubic) function. Also, All graphs show 0 to 1000 trials, cutting off everything else beyond that to make the graphs more comparable. It looks like there is a rather sharp drop after 150-300 trials in each of these sub-samples. 
+
+```{r, fig.width = 10, fig.height = 30}
+ap <- ggplot(FoodT[1:100, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+bp <- ggplot(FoodT[101:200, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+cp <- ggplot(FoodT[201:300, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+dp <- ggplot(FoodT[301:400, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+ep <- ggplot(FoodT[401:500, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+fp <- ggplot(FoodT[501:600, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+gp <- ggplot(FoodT[601:700, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+hp <- ggplot(FoodT[701:800, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+ip <- ggplot(FoodT[801:900, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+jp <- ggplot(FoodT[901:1000, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+kp <- ggplot(FoodT[1001:1100, ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+lp <- ggplot(FoodT[1100:nrow(FoodT), ], aes(x = n_unhealthy, y = unhlthymean_diff)) +
+  geom_point() +
+  geom_jitter() +
+  theme_minimal()+ 
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+  geom_smooth(alpha = 0.4) +
+  geom_smooth(method = "lm", formula = y~poly(x, 3), color = "red", alpha = 0.4) +
+  xlim(0, 1000)
+
+cowplot::plot_grid(ncol = 1,
+                   ap, bp, cp, dp, ep, fp, gp, hp, ip, jp, kp, lp)
+```
+
+And then we can look at this separately for different food categories. I'm only showing some of the food categories for illustrative purposes.
+
+```{r fig.show = "hold"}
+# Biscuits
+bis_plot <- ggplot(FoodT, aes(x = n_biscuits, y = bis_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  theme_minimal() +
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+   
+  ggtitle("Biscuits")
+# Chocolate
+choco_plot <- ggplot(FoodT, aes(x = n_chocolate, y = choco_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  theme_minimal() +
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+   
+  ggtitle("Chocolate")
+# Crisps
+crisps_plot <- ggplot(FoodT, aes(x = n_crisps, y = crisp_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  theme_minimal() +
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+   
+  xlim(0, 400)  +
+  ggtitle("Crisps")
+# Sweets
+sweets_plot <- ggplot(FoodT, aes(x = n_sweets, y = sweet_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  theme_minimal() +
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+   
+  ggtitle("Sweets")
+# Fizzydrinks
+fizzydrinks_plot <- ggplot(FoodT, aes(x = n_fizzydrinks, y = fzdrink_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  theme_minimal() +
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+   
+  ggtitle("Fizzydrinks")
+# Pizza
+pizza_plot <- ggplot(FoodT, aes(x = n_pizza, y = pizza_diff)) + 
+  geom_point(alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "green") +
+  theme_minimal() +
+  xlab("Amount of trials") +
+  ylab("Intake T2 - T1") +
+   
+  ggtitle("Pizza")
+
+
+cowplot::plot_grid(nrow = 3, ncol =2, 
+         bis_plot,
+         choco_plot,
+         crisps_plot,
+         sweets_plot,
+         fizzydrinks_plot,
+         pizza_plot)
+```
+
+# Hypothesis 1: unhealthy foods
+
+## Overall unhealthy foods 
+
+Let's dive into the regression models. First off, we run a random-intercept mixed model with unhealthy food intake as outcome and the time X amount of trials with unhealthy foods as the main predictor of interest. We then add gender, BMI, smoking and dieting status, and age as control variables.
+
+```{r, results='asis' }
+FoodT_long <- FoodT %>%
+  dplyr::select(., email_id, metcon0, bmi0, age, gender, smoker0, diet0, n_unhealthy, unhlthymean, unhlthymean1) %>%
+  gather(., "timepoint", "unhealthy_intake", c("unhlthymean", "unhlthymean1")) %>%
+  dplyr::mutate(timepoint = recode_factor(timepoint,
+                                   "unhlthymean" = "T1", 
+                                   "unhlthymean1" = "T2"),
+                 n_unhealthy_sq = n_unhealthy^2,
+                n_unhealthy_cub = n_unhealthy^3)
+
+mixed_model_FFQ_T2_no_cov <- lme4::lmer(unhealthy_intake ~ n_unhealthy*timepoint +
+                                   (1|email_id), 
+                                 data = FoodT_long,
+                                 na.action = na.exclude)
+
+mixed_model_FFQ_T2_no_cov_quad <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 2)*timepoint + 
+                                   (1|email_id), 
+                                data = FoodT_long,
+                                na.action = na.exclude)
+
+mixed_model_FFQ_T2_no_cov_cub <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 3)*timepoint + 
+                                   (1|email_id), 
+                                data = FoodT_long,
+                                na.action = na.exclude)
+                
+mixed_model_FFQ_T2 <- lme4::lmer(unhealthy_intake ~ n_unhealthy*timepoint + 
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + factor(metcon0) +
+                                   (1|email_id), 
+                                 data = FoodT_long,
+                                 na.action = na.exclude)
+
+mixed_model_FFQ_T2_quad <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 2)*timepoint +
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + factor(metcon0) +
+                                   (1|email_id), 
+                                 data = FoodT_long,
+                                 na.action = na.exclude)
+
+mixed_model_FFQ_T2_cub <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 3)*timepoint +
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + factor(metcon0) +
+                                   (1|email_id), 
+                                 data = FoodT_long,
+                                 na.action = na.exclude)
+
+
+stargazer::stargazer(mixed_model_FFQ_T2_no_cov, mixed_model_FFQ_T2_no_cov_quad, mixed_model_FFQ_T2_no_cov_cub,
+                     mixed_model_FFQ_T2, mixed_model_FFQ_T2_quad, mixed_model_FFQ_T2_cub,
+                     type = "html", digits = 5)
+```
+
+
+Adding the covariates does not change the results too much. The regression weight for the time X training interaction in the full model is `r coef(mixed_model_FFQ_T2)$email_id[1,9]` (as opposed to the one without the covariates `r coef(mixed_model_FFQ_T2)$email_id[1,9]`). So one single trial reduces the average unhealthy FFQ score by `r coef(mixed_model_FFQ_T2)$email_id[1,9]`.
+
+
+I then run the model again, excluding all obese participants. This actually seems to have some influence on the effects: the quadratic and cubic effects are no longer significant at .05 level, and I don't think that's due to a reduced sample size: We still have 581 people in the sample.
+
+```{r, results = "asis"}
+mixed_model_FFQ_T2_no_cov <- lme4::lmer(unhealthy_intake ~ n_unhealthy*timepoint +
+                                          (1|email_id), 
+                                        data = subset(FoodT_long, bmi0 < 30),
+                                        na.action = na.exclude)
+
+mixed_model_FFQ_T2_no_cov_quad <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 2)*timepoint + 
+                                               (1|email_id), 
+                                             data = subset(FoodT_long, bmi0 < 30),
+                                             na.action = na.exclude)
+
+mixed_model_FFQ_T2_no_cov_cub <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 3)*timepoint + 
+                                              (1|email_id), 
+                                            data = subset(FoodT_long, bmi0 < 30),
+                                            na.action = na.exclude)
+
+mixed_model_FFQ_T2 <- lme4::lmer(unhealthy_intake ~ n_unhealthy*timepoint + 
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + factor(metcon0) +
+                                   (1|email_id), 
+                                 data = subset(FoodT_long, bmi0 < 30),
+                                 na.action = na.exclude)
+
+mixed_model_FFQ_T2_quad <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 2)*timepoint +
+                                        bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + factor(metcon0) +
+                                        (1|email_id), 
+                                      data = subset(FoodT_long, bmi0 < 30),
+                                      na.action = na.exclude)
+
+mixed_model_FFQ_T2_cub <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 3)*timepoint +
+                                       bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + factor(metcon0) +
+                                       (1|email_id), 
+                                     data = subset(FoodT_long, bmi0 < 30),
+                                     na.action = na.exclude)
+
+stargazer::stargazer(mixed_model_FFQ_T2_no_cov, mixed_model_FFQ_T2_no_cov_quad, mixed_model_FFQ_T2_no_cov_cub,
+                     mixed_model_FFQ_T2, mixed_model_FFQ_T2_quad, mixed_model_FFQ_T2_cub,
+                     type = "html", digits = 5)
+```
+
+And again, removing participants with a metabolic condition:
+
+```{r, results = "asis"}
+mixed_model_FFQ_T2_no_cov <- lme4::lmer(unhealthy_intake ~ n_unhealthy*timepoint +
+                                          (1|email_id), 
+                                        data = subset(FoodT_long, metcon0 == "No"),
+                                        na.action = na.exclude)
+
+mixed_model_FFQ_T2_no_cov_quad <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 2)*timepoint + 
+                                               (1|email_id), 
+                                             data = subset(FoodT_long, metcon0 == "No"),
+                                             na.action = na.exclude)
+
+mixed_model_FFQ_T2_no_cov_cub <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 3)*timepoint + 
+                                              (1|email_id), 
+                                            data = subset(FoodT_long, metcon0 == "No"),
+                                            na.action = na.exclude)
+
+mixed_model_FFQ_T2 <- lme4::lmer(unhealthy_intake ~ n_unhealthy*timepoint + 
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + 
+                                   (1|email_id), 
+                                 data = subset(FoodT_long, metcon0 == "No"),
+                                 na.action = na.exclude)
+
+mixed_model_FFQ_T2_quad <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 2)*timepoint +
+                                        bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + 
+                                        (1|email_id), 
+                                      data = subset(FoodT_long, metcon0 == "No"),
+                                      na.action = na.exclude)
+
+mixed_model_FFQ_T2_cub <- lme4::lmer(unhealthy_intake ~ poly(n_unhealthy, 3)*timepoint +
+                                       bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + 
+                                       (1|email_id), 
+                                     data = subset(FoodT_long, metcon0 == "No"),
+                                     na.action = na.exclude)
+
+stargazer::stargazer(mixed_model_FFQ_T2_no_cov, mixed_model_FFQ_T2_no_cov_quad, mixed_model_FFQ_T2_no_cov_cub,
+                     mixed_model_FFQ_T2, mixed_model_FFQ_T2_quad, mixed_model_FFQ_T2_cub,
+                     type = "html", digits = 5)
+```
+
+
+## Error learning index
+
+```{r}
+# The code that follows is really clumsy but mainly because the files are so large that R has trouble working with it all at once.
+# So I'm trying to break it into smaller bits
+
+image_frequencies_types <- FoodT_training %>% 
+  dplyr::select(., "login", "date", contains("type")) %>%
+  gather(., "trial_number", "type", "1_1_type":"3_32_type")
+image_frequencies_types$trial_number <- gsub(pattern = "_type", replacement = "", image_frequencies_types$trial_number, fixed = TRUE)
+
+image_frequencies_corrects <- FoodT_training %>% 
+  dplyr::select(., "login", contains("correct")) %>%
+  gather(., "trial_number", "correct", "1_1_correct":"3_32_correct")
+image_frequencies_corrects$trial_number <- gsub(pattern = "_correct", replacement = "", image_frequencies_corrects$trial_number, fixed = TRUE)
+
+image_frequencies_images <- FoodT_training %>% 
+  dplyr::select(., "login", contains("image"), -"image_category") %>%
+  gather(., "trial_number", "image", "1_1_image":"3_32_image")
+image_frequencies_images$trial_number <- gsub(pattern = "_image", replacement = "", image_frequencies_images$trial_number, fixed = TRUE)
+
+image_freqs_types_corrects <- bind_cols(image_frequencies_types, image_frequencies_corrects) 
+image_freqs_types_full <- bind_cols(image_freqs_types_corrects, image_frequencies_images)
+image_freqs_types_full <- subset(image_freqs_types_full, select = - c(trial_number1, trial_number2))
+
+image_freqs_types_full <- image_freqs_types_full %>%
+  dplyr::select(., -login1, -login2) %>%
+  dplyr::mutate(type = recode(type,
+                                 "control-no-go" = "control_no_go", 
+                                 "control-go" = "control_go",
+                                 "go" = "go",
+                                 "no-go" = "no_go"))
+# Now this is a dataframe that holds information about login (=ppt), the date when the training was conducted, the trial number, trial type (go, no-go, control-go, control-no-go), and reaction correctness
+# From this, we should be able to calculate error rates for the different kinds of trials
+
+
+# Of all trials, 25% are control go, 25% are control no-go, 25% healthy go, and 25% unhealthy no-go
+# In the fllowing step, I calculate the individual total trial number, and then calculate the frequency of trials in each category for each participant
+# Then, I calculate the error rate within the No-Go trials
+
+# Creating an error learning index:
+error_rates <- image_freqs_types_full %>%
+  unite(., "type_correct", c(type, correct), sep = "_") %>%
+  group_by(login, type_correct) %>%
+  summarise(n=n()) %>%
+  spread(., type_correct, n) %>%
+  dplyr::select(., -"NA_0") %>% ## The "NA_0" column is for trials which were not actually conducted, so when users interrupted the session (I think). We don't care about this, at least for now.
+  mutate_at(vars(control_go_0:no_go_1), ~replace(., is.na(.), 0)) %>%
+  rowwise() %>%
+  mutate(., total_n_trials = control_go_0 + control_go_1 + control_no_go_0 + control_no_go_1 + go_0 + go_1 + no_go_0 + no_go_1,
+         control_go_0_freq = control_go_0/total_n_trials,
+         control_go_1_freq = control_go_1/total_n_trials,
+         control_no_go_0_freq = control_no_go_0/total_n_trials,
+         control_no_go_1_freq = control_no_go_1/total_n_trials,
+         go_0_freq = go_0/total_n_trials,
+         go_1_freq = go_1/total_n_trials,
+         no_go_0_freq = no_go_0/total_n_trials,
+         no_go_1_freq = no_go_1/total_n_trials,
+         error_rate_unh_NoGo = no_go_0/(no_go_0+no_go_1), # no_go_0 is an incorrect unhealthy No-Go-trial, no_go_1 is a correct unhealthy No-Go-trial
+         error_rate_filler_NoGo = control_no_go_0/(control_no_go_0+control_no_go_1)) %>% # These are the control equivalents
+  mutate(., error_learning_index = error_rate_filler_NoGo - error_rate_unh_NoGo) %>%
+  rename(., "email_id" = "login")
+```
+
+We are interested in how making fewer errors in unhealthy No-Go trials (compared to control No-Go-trials) is related to larger reductions in unhealthy food intake. The logic here is that unhealthy foods are _always_ No-Go trials whereas filler trials are only 50% No-Go trials. 
+To investigate this, I calculated an _unhealthy No-Go error rate_ by dividing the number of erroneous unhealthy No-Go trials by the total number of unhealthy No-Go trials. I then did the same thing for the control No-Go trials. The _error learning index_ (which is what we are interested in) is the difference between those two error rates: values larger than zero indicate that the error rate for unhealthy No-Go trials is lower than the error rate for control No-Go trials.
+The distribution of this index across the sample looks like this:
+
+```{r}
+ggplot(error_rates, aes(error_learning_index)) +
+  geom_histogram(binwidth = 0.005)
+error_rates_long <- error_rates %>% 
+  gather(., "type", "error_rate", error_rate_filler_NoGo:error_rate_unh_NoGo)
+```
+
+The mean of the error learning index is `r mean(error_rates$error_learning_index, na.rm = TRUE)` with a standard deviation of `r sd(error_rates$error_learning_index, na.rm = TRUE)`, so for most people, this index is extremely close to zero. I suppose this is mainly due to the fact that error rates are very low in general with an overall mean error rate of `r mean(error_rates_long$error_rate, na.rm = TRUE)` (sd = `r sd(error_rates_long$error_rate, na.rm = TRUE)`).
+
+```{r}
+ggplot(error_rates_long, aes(error_rate, fill = error_rates_long$type)) + 
+  geom_histogram(position = "dodge", binwidth = .005) +
+  theme_minimal()
+```
+
+Nevertheless, we can run the regression including the error learning index as a predictor.
+
+```{r, results = "asis"}
+errors_FFQ <- full_join(error_rates, FFQ_full, by = "email_id")
+errors_FFQ_long <- errors_FFQ %>%
+  gather(., "timepoint", "food_intake", c("unhlthymean", "unhlthymean1")) %>%
+  dplyr::mutate(timepoint = recode(timepoint,
+                                   "unhlthymean" = "T1", 
+                                   "unhlthymean1" = "T2"))
+
+error_index_model_no_cov <- lme4::lmer(food_intake ~ error_learning_index*timepoint + (1|email_id), data = errors_FFQ_long)
+
+error_index_model <- lme4::lmer(food_intake ~ error_learning_index*timepoint + 
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + 
+                                  (1|email_id), data = errors_FFQ_long)
+
+stargazer::stargazer(error_index_model_no_cov, error_index_model, 
+                     type = "html")
+```
+
+We see no significant effects of the error learning index on food intake in this mixed model. Again, this is probably due to the little variation we have in this variable.
+
+# Hypothesis 2: Differences between foods
+
+## Univariate regressions by food type
+
+We now proceed to look at the regression models from Hypothesis 1.1 separately by food type, so we use the amount of trials for that specific food as a predictor and intake of that food as the outcome.
+
+```{r, results='asis' }
+long_by_food <- FoodT %>%
+  gather(., "food_timepoint", "intake", c("crisp":"crispbr", "crisp1":"crispbr1")) %>%
+  dplyr::mutate(food_timepoint = recode(food_timepoint,
+                                   "alco" = "alco0",
+                                   "bis" = "bis0",
+                                   "bread" = "bread0",
+                                   "cake" = "cake0",
+                                   "cheese" = "cheese0",
+                                   "chips" = "chips0",
+                                   "choco" = "choco0",
+                                   "crisp" = "crisp0",
+                                   "crispbr" = "crispbr0",
+                                   "ffood" = "ffood0",
+                                   "fruit" = "fruit0",
+                                   "fzdrink" = "fzdrink0",
+                                   "ice" = "ice0",
+                                   "meat" = "meat0",
+                                   "pastri" = "pastri0",
+                                   "pizza" = "pizza0",
+                                   "sweet" = "sweet0",
+                                   "vege" = "vege0")) %>%
+  separate(., "food_timepoint", sep = -1, into = c("food", "time"))
+  
+# alcohol
+alcohol <- lme4::lmer(intake ~ n_alcohol*time + 
+                        bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + (1|email_id), data = subset(long_by_food, food == "alco"))
+
+# biscuits
+biscuits <- lme4::lmer(intake ~ n_biscuits*time + 
+                         bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + (1|email_id), data = subset(long_by_food, food == "bis"))
+
+# bread
+bread <- lme4::lmer(intake ~ n_bread*time + 
+                      bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "bread"))
+
+# cake
+cake <- lme4::lmer(intake ~ n_cakes*time + 
+                     bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "cake"))
+
+# cheese
+cheese <- lme4::lmer(intake ~ n_cheese*time + 
+                       bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "cheese"))
+
+# chips ######### This doesn't work as there's no data on chips!!
+
+# chocolate
+chocolate <- lme4::lmer(intake ~ n_chocolate*time + 
+                          bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "choco"))
+
+# crisps
+crisps <- lme4::lmer(intake ~ n_crisps*time + 
+                         bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "crisp"))
+
+
+# crispbread
+# crispbread <- lme4::lmer(intake ~ n_crisps*time + 
+#                           bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "crispbr"))
+#summary(lmerTest::lmer(intake ~ n_crisps*time + 
+#                         bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "crispbr")))
+
+# fast food
+fastfood <- lme4::lmer(intake ~ n_fastfood*time + 
+                         bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "ffood"))
+
+# fruit
+fruit <- lme4::lmer(intake ~ n_fruit*time + 
+                      bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "fruit"))
+
+# fizzy drinks
+fizzydrinks <- lme4::lmer(intake ~ n_fizzydrinks*time + 
+                            bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "fzdrink"))
+
+# ice cream ######### This doesn't work as there's no data on ice cream!!
+
+# meat
+meat <- lme4::lmer(intake ~ n_meat*time + 
+                     bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "meat"))
+
+# pastries ######### This doesn't work as there's no data on pastries!!
+
+# pizza
+pizza <- lme4::lmer(intake ~ n_pizza*time + 
+                      bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "pizza"))
+
+# sweets
+sweets <- lme4::lmer(intake ~ n_sweets*time + 
+                       bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "sweet"))
+
+# vege
+vege <- lme4::lmer(intake ~ n_vegetables*time + 
+                     bmi01 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0)  + (1|email_id), data = subset(long_by_food, food == "vege"))
+
+stargazer::stargazer(alcohol, biscuits, bread, cake, cheese, chocolate, crisps, fastfood, fruit, fizzydrinks, meat, pizza, sweets, vege,
+                     type = "html")
+```
+
+So we see a bit of variation in the regression weights, from `r coef(fruit)$email_id[1,9]` for fruit to `r coef(pizza)$email_id[1,9]` for pizza.
+
+## Multivariate regression
+
+In hypothesis 2 we pre-registered running a multivariate model. Here is the output from the model that predicts food intake at T2 for the different foods with food intake at T1 and the amounts of trials of the different foods as predictors. The same covariates as earlier are included in the model. Obviously, this is hard to interpret but it seems like no consistent pattern is emerging - there do not seem to be clear "cross-over" effects from one kind of food to others. I am leaving out these results as it takes lots of space and is a drag to look at.
+
+```{r, results="hide"}
+#### Let's go for the multivariate model #### Hypothesis 2
+multivar <- lm(cbind(crisp1, choco1, bis1,  
+                      sweet1, cake1, alco1, 
+                     bread1, cheese1, ffood1, 
+                     fzdrink1, meat1, pizza1, 
+                     fruit1, vege1, crispbr1) ~ 
+                             n_alcohol + n_biscuits + n_bread + 
+                             n_cakes + n_cheese + n_chocolate + 
+                             n_crisps + n_fastfood + n_fizzydrinks + 
+                             n_icecream + n_meat + n_pastries + 
+                             n_pizza + n_sweets +
+                 + crisp + choco + bis +  
+               sweet + cake + alco + 
+               bread + cheese + ffood + 
+               fzdrink + meat + pizza + 
+               fruit + vege + crispbr +
+                 bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0),
+                           data = FoodT)
+summary(multivar)
+```
+
+
+# Hypothesis 3: Healthy foods
+
+## Overall healthy foods
+
+We first do the same thing as for the unhealthy foods: we run a random-intercept mixed model with the number of trials as the main predictor of interest, with and without control variables.
+
+```{r, results = "asis"}
+FoodT_long_healthy <- FoodT %>%
+  dplyr::select(., email_id, bmi0, age, gender, smoker0, diet0, n_healthy, hlthymean, hlthymean1) %>%
+  gather(., "timepoint", "healthy_intake", c("hlthymean", "hlthymean1")) %>%
+  dplyr::mutate(timepoint = recode_factor(timepoint,
+                                          "hlthymean" = "T1", 
+                                          "hlthymean1" = "T2"))
+
+
+mixed_model_FFQ_T2_healthy_no_cov <- lme4::lmer(healthy_intake ~ n_healthy*timepoint + 
+                                   (1|email_id), 
+                                 data = FoodT_long_healthy,
+                                 na.action = na.exclude)
+mixed_model_FFQ_T2_healthy <- lme4::lmer(healthy_intake ~ n_healthy*timepoint + 
+                                   bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + 
+                                   (1|email_id), 
+                                 data = FoodT_long_healthy,
+                                 na.action = na.exclude)
+stargazer::stargazer(mixed_model_FFQ_T2_healthy_no_cov, mixed_model_FFQ_T2_healthy, 
+                     type = "html")
+```
+
+
+## RT learning index
+
+```{r}
+FoodT_by_trial_RT <- FoodT_training %>%
+  dplyr::select(., "login", "date", tidyselect::contains("_rt"), -"mean_rt") %>%
+  gather(., key = "trial", value = "RT", tidyselect::contains("_rt")) 
+FoodT_by_trial_RT$trial <- gsub(pattern = "_rt", replacement = "", FoodT_by_trial_RT$trial, fixed = TRUE)
+
+FoodT_by_trial_types <- FoodT_training %>%
+  dplyr::select(., "login", contains("_type")) %>%
+  gather(., key = "trial", value = "type", tidyselect::contains("_type"))
+FoodT_by_trial_types$trial <- as.factor(gsub(pattern = "_type", replacement = "", FoodT_by_trial_RT$trial, fixed = TRUE))
+
+FoodT_by_trial_correct <- FoodT_training %>%
+  dplyr::select(., "login", contains("_correct")) %>%
+  gather(., key = "trial", value = "correct", tidyselect::contains("_correct"))
+FoodT_by_trial_correct$trial <- gsub(pattern = "_correct", replacement = "", FoodT_by_trial_RT$trial, fixed = TRUE)
+
+FoodT_by_trial_image <- FoodT_training %>%
+  dplyr::select(., "login", contains("_image"))%>%
+  gather(., key = "trial", value = "image", tidyselect::contains("_image"))
+FoodT_by_trial_image$trial <- as.factor(gsub(pattern = "_image", replacement = "", FoodT_by_trial_RT$trial, fixed = TRUE))
+
+FoodT_RT <- dplyr::bind_cols(list(FoodT_by_trial_RT, FoodT_by_trial_types, FoodT_by_trial_correct, FoodT_by_trial_image)) %>%
+  dplyr::select(., -c(trial1, trial2, trial3, login1, login2, login3)) %>% 
+  dplyr::mutate(type = recode(type,
+                              "control-no-go" = "control_no_go", 
+                              "control-go" = "control_go",
+                              "go" = "go",
+                              "no-go" = "no_go")) %>%
+  rename(., "email_id" = "login") %>%
+  subset(., type == "go"|type == "control_go") %>%
+  subset(., RT > 0 & RT < 1500) # Now this dataframe FoodT_RT has only Go-trials
+                 
+
+mean_RTs_by_type <- FoodT_RT %>%
+  group_by(email_id, type) %>%
+  summarise("ind_mean_RT" = mean(RT)) %>%
+  spread("type", "ind_mean_RT") %>%
+  mutate(., RT_learning_index = control_go - go) # So here we have our RT learning index: if it's positive, that participant took longer to respond to control stimuli (as we would expect)
+```
+
+Lastly, we want to investigate how reaction time differences between healthy Go-trials and control Go-trials differ, again following the logic that the 100% reliable mapping speeds up reactions to healthy foods. The _RT learning index_ is a participants difference between reaction times to healthy Go-trials and control Go-trials. Here is the distribution of the reaction times and the index. The mean is `r mean(mean_RTs_by_type$error_learning_index, na.rm = TRUE)` with sd = `r sd(mean_RTs_by_type$error_learning_index, na.rm = TRUE)`.
+
+```{r}
+p1 <- ggplot(mean_RTs_by_type, aes(control_go)) +
+  geom_histogram(binwidth = 5) +
+  theme_minimal()
+
+p2 <- ggplot(mean_RTs_by_type, aes(go)) +
+  geom_histogram(binwidth = 5) +
+  theme_minimal()
+
+p3 <- ggplot(mean_RTs_by_type, aes(RT_learning_index)) +
+  geom_histogram(binwidth = 5) +
+  theme_minimal()
+
+cowplot::plot_grid(p1, p2, p3)
+```
+
+And now let's run the regression model. Same procedure as earlier.
+
+```{r, results = "asis"}
+RTs_FFQ <- full_join(mean_RTs_by_type, FFQ_full, by = "email_id")
+RTs_FFQ_long <- RTs_FFQ %>%
+  gather(., "timepoint", "food_intake", c("unhlthymean", "unhlthymean1")) %>%
+  dplyr::mutate(timepoint = recode(timepoint,
+                                   "unhlthymean" = "T1", 
+                                   "unhlthymean1" = "T2"))
+
+# And here is the model with the RT learning index, first without then with covariates
+RT_learning_no_cov <- lme4::lmer(food_intake ~ RT_learning_index*timepoint + (1|email_id), data = RTs_FFQ_long)
+RT_learning <- lme4::lmer(food_intake ~ RT_learning_index*timepoint + 
+                                 bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) +
+                                (1|email_id), data = RTs_FFQ_long)
+
+stargazer::stargazer(RT_learning_no_cov, RT_learning, 
+                     type = "html")
+
+```
