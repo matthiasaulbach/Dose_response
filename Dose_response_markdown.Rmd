@@ -136,7 +136,7 @@ FoodT <- inner_join(FFQ_full, image_freqs_cats, by = "email_id")
 
 # Descriptive graphs and summaries
 
-Let's first take a look at our sample: we have `r sum(FFQ_T1$gender =="Female", na.rm = TRUE)` women, `r sum(FFQ_T1$diet0 =="Yes", na.rm = TRUE)` dieters at T1, `r sum(FFQ_T1$diet1 =="Yes", na.rm = TRUE)` at T2, `r sum(FFQ_T1$smoker0 =="Yes", na.rm = TRUE)` at T1, and `r sum(FFQ_T1$smoker1 =="Yes", na.rm = TRUE)` at T2. The distribution of BMI at T1 and age look as follows.
+Let's first take a look at our sample: we have `r sum(FFQ_T1$gender =="Female", na.rm = TRUE)` women and `r sum(FFQ_T1$gender =="Male", na.rm = TRUE)` men, `r sum(FFQ_T1$diet0 =="Yes", na.rm = TRUE)` dieters at T1, `r sum(FFQ_T1$diet1 =="1", na.rm = TRUE)` at T2, `r sum(FFQ_T1$smoker0 =="Yes", na.rm = TRUE)` smokers at T1, and `r sum(FFQ_T1$smoker1 =="Yes", na.rm = TRUE)` at T2. The distribution of BMI at T1 and age look as follows.
 
 ```{r}
 bmi <- ggplot(FoodT, aes(bmi0)) + 
