@@ -639,7 +639,13 @@ error_rates <- image_freqs_types_full %>%
 ```
 
 We are interested in how making fewer errors in unhealthy No-Go trials (compared to control No-Go-trials) is related to larger reductions in unhealthy food intake. The logic here is that unhealthy foods are _always_ No-Go trials whereas filler trials are only 50% No-Go trials. 
-To investigate this, I calculated an _unhealthy No-Go error rate_ by dividing the number of erroneous unhealthy No-Go trials by the total number of unhealthy No-Go trials. I then did the same thing for the control No-Go trials. The _error learning index_ (which is what we are interested in) is the difference between those two error rates: values larger than zero indicate that the error rate for unhealthy No-Go trials is lower than the error rate for control No-Go trials.
+To investigate this, I calculated an _unhealthy No-Go error rate_ by dividing the number of erroneous unhealthy No-Go trials by the total number of unhealthy No-Go trials. I then did the same thing for the control No-Go trials. The mean No-Go error rate for unhealthy foods was `r round(mean(error_rates$error_rate_unh_NoGo, na.rm = TRUE), 4)`, sd = `r round(sd(error_rates$error_rate_unh_NoGo, na.rm = TRUE), 4)` and for control images `r round(mean(error_rates$error_rate_filler_NoGo, na.rm = TRUE), 4)`, sd = `r round(sd(error_rates$error_rate_filler_NoGo, na.rm = TRUE), 4)`. A paired t-test shows that this (tiny) difference is highly significant:
+
+```{r}
+t.test(error_rates$error_rate_unh_NoGo, error_rates$error_rate_filler_NoGo, paired = TRUE)
+```
+
+The _error learning index_ (which is what we are interested in) is the difference between those two error rates: values larger than zero indicate that the error rate for unhealthy No-Go trials is lower than the error rate for control No-Go trials.
 The distribution of this index across the sample looks like this:
 
 ```{r}
@@ -882,7 +888,16 @@ mean_RTs_by_type <- FoodT_RT %>%
   mutate(., RT_learning_index = control_go - go) # So here we have our RT learning index: if it's positive, that participant took longer to respond to control stimuli (as we would expect)
 ```
 
-Lastly, we want to investigate how reaction time differences between healthy Go-trials and control Go-trials differ, again following the logic that the 100% reliable mapping speeds up reactions to healthy foods. The _RT learning index_ is a participants difference between reaction times to healthy Go-trials and control Go-trials. Here is the distribution of the reaction times and the index. The mean is `r mean(mean_RTs_by_type$error_learning_index, na.rm = TRUE)` with sd = `r sd(mean_RTs_by_type$error_learning_index, na.rm = TRUE)`.
+Lastly, we want to investigate how reaction time differences between healthy Go-trials and control Go-trials differ, again following the logic that the 100% reliable mapping speeds up reactions to healthy foods. To compare the mean RTs for healthy foods and control images, we run a paired t-test:
+
+```{r}
+t.test(mean_RTs_by_type$control_go, mean_RTs_by_type$go,
+       paired = TRUE)
+```
+
+The mean reaction times are `r round(mean(mean_RTs_by_type$go, na.rm = TRUE), 2)`, sd = `r round(sd(mean_RTs_by_type$go, na.rm = TRUE), 2)` for healthy foods and `r round(mean(mean_RTs_by_type$control_go, na.rm = TRUE), 2)`, sd = `r round(sd(mean_RTs_by_type$control_go, na.rm = TRUE), 2)` for fillers
+
+The _RT learning index_ is a participant's difference between mean reaction time to healthy Go-trials and control Go-trials. Here is the distribution of the reaction times and the index. The mean of the index is `r round(mean(mean_RTs_by_type$RT_learning_index, na.rm = TRUE), 2)` with sd = `r round(sd(mean_RTs_by_type$RT_learning_index, na.rm = TRUE), 2)`.
 
 ```{r}
 p1 <- ggplot(mean_RTs_by_type, aes(control_go)) +
@@ -899,6 +914,7 @@ p3 <- ggplot(mean_RTs_by_type, aes(RT_learning_index)) +
 
 cowplot::plot_grid(p1, p2, p3)
 ```
+
 
 And now let's run the regression model. Same procedure as earlier.
 
