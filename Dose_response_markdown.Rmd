@@ -786,9 +786,9 @@ So we see a bit of variation in the regression weights, from `r coef(fruit)$emai
 
 ## Multivariate regression
 
-In hypothesis 2 we pre-registered running a multivariate model. Here is the output from the model that predicts food intake at T2 for the different foods with food intake at T1 and the amounts of trials of the different foods as predictors. The same covariates as earlier are included in the model. Obviously, this is hard to interpret but it seems like no consistent pattern is emerging - there do not seem to be clear "cross-over" effects from one kind of food to others. I am leaving out these results as it takes lots of space and is a drag to look at.
+In hypothesis 2 we pre-registered running a multivariate model. The model predicts food intake at T2 for the different foods with food intake at T1 and the amounts of trials of the different foods as predictors. The same covariates as earlier are included in the model. Obviously, this is hard to interpret but it seems like no consistent pattern is emerging - there do not seem to be clear "cross-over" effects from one kind of food to others. I am leaving out these results as it takes lots of space and is a drag to look at.
 
-```{r, results="hide"}
+```{r, results = "hide"}
 #### Let's go for the multivariate model #### Hypothesis 2
 multivar <- lm(cbind(crisp1, choco1, bis1,  
                       sweet1, cake1, alco1, 
