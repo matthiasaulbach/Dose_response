@@ -895,7 +895,7 @@ t.test(mean_RTs_by_type$control_go, mean_RTs_by_type$go,
        paired = TRUE)
 ```
 
-The mean reaction times are `r round(mean(mean_RTs_by_type$go, na.rm = TRUE), 2)`, sd = `r round(sd(mean_RTs_by_type$go, na.rm = TRUE), 2)` for healthy foods and `r round(mean(mean_RTs_by_type$control_go, na.rm = TRUE), 2)`, sd = `r round(sd(mean_RTs_by_type$control_go, na.rm = TRUE), 2)` for fillers
+The mean reaction times are `r round(mean(mean_RTs_by_type$go, na.rm = TRUE), 2)`, sd = `r round(sd(mean_RTs_by_type$go, na.rm = TRUE), 2)` for healthy foods and `r round(mean(mean_RTs_by_type$control_go, na.rm = TRUE), 2)`, sd = `r round(sd(mean_RTs_by_type$control_go, na.rm = TRUE), 2)` for fillers.
 
 The _RT learning index_ is a participant's difference between mean reaction time to healthy Go-trials and control Go-trials. Here is the distribution of the reaction times and the index. The mean of the index is `r round(mean(mean_RTs_by_type$RT_learning_index, na.rm = TRUE), 2)` with sd = `r round(sd(mean_RTs_by_type$RT_learning_index, na.rm = TRUE), 2)`.
 
@@ -921,14 +921,14 @@ And now let's run the regression model. Same procedure as earlier.
 ```{r, results = "asis"}
 RTs_FFQ <- full_join(mean_RTs_by_type, FFQ_full, by = "email_id")
 RTs_FFQ_long <- RTs_FFQ %>%
-  gather(., "timepoint", "food_intake", c("unhlthymean", "unhlthymean1")) %>%
+  gather(., "timepoint", "healthy_intake", c("hlthymean", "hlthymean1")) %>%
   dplyr::mutate(timepoint = recode(timepoint,
-                                   "unhlthymean" = "T1", 
-                                   "unhlthymean1" = "T2"))
+                                   "hlthymean" = "T1", 
+                                   "hlthymean1" = "T2"))
 
 # And here is the model with the RT learning index, first without then with covariates
-RT_learning_no_cov <- lme4::lmer(food_intake ~ RT_learning_index*timepoint + (1|email_id), data = RTs_FFQ_long)
-RT_learning <- lme4::lmer(food_intake ~ RT_learning_index*timepoint + 
+RT_learning_no_cov <- lme4::lmer(healthy_intake ~ RT_learning_index*timepoint + (1|email_id), data = RTs_FFQ_long)
+RT_learning <- lme4::lmer(healthy_intake ~ RT_learning_index*timepoint + 
                                  bmi0 + age + as.factor(gender) + as.factor(smoker0) + as.factor(diet0) + as.factor(metcon0) +
                                 (1|email_id), data = RTs_FFQ_long)
 
